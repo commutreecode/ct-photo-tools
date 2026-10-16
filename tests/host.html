@@ -1,0 +1,41 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>ct-photo test host</title>
+<style>#ed{position:fixed;inset:0;background:#fff;overflow:auto} #toast{min-height:1em} .edt{display:block}</style></head>
+<body>
+<div id="app"><div class="ph" data-slot="hero"><button type="button" data-pe="hero">✎</button></div><div class="side"></div></div>
+<div id="toast"></div>
+<script>
+// A minimal page that implements the host contract of web/ct-photo.js (one photo box "hero"), for the tests.
+const $ = (s, el) => (el || document).querySelector(s);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const BUSY = /^(Enhancing photo)…/;
+const stuck = p => false;
+const isBusy = p => BUSY.test((p && p.status) || '');
+let P = { id: 'P1', status: 'Saved', form: {}, photos: new Set(['hero']) };
+let PEND = {}, dirty = false, GAL = [], THUMB = {}, INFO = { hero: { w: 900, h: 1100, b: 1 } }, EDIT = {}, EP = {};
+let BGV = {}, HASORIG = {}, OP = {}, RESET = new Set();
+window.__renders = 0; window.__toasts = [];
+function api(action, args) {
+  return Promise.resolve(window.__backend(action, args || {})).then(r => { if (r && r.error) throw new Error(r.error); return r; });
+}
+function toast(msg) { window.__toasts.push(msg); $('#toast').textContent = msg; }
+function render() { window.__renders++; }
+function markDirty() { dirty = true; }
+function refreshSide() {}
+async function reload() { const r = await api('get', { id: P.id }); P.status = r.status; P.enh = r.enh; }
+function loadThumbs() {}
+function startPoll() {}
+const isLogo = role => /^logo/.test(role);
+function usedLong(info, e) { return info ? Math.max(info.w || info.sw || 0, info.h || info.sh || 0) : 0; }
+function level(info, e) { const L = usedLong(info, e); return !L ? '' : L >= 1600 ? 'g' : L >= 1000 ? 'a' : 'r'; }
+function edTarget(kind, key) {
+  const r = key, opt = (o, v) => { if (v) o[r] = v; else delete o[r]; };
+  return { role: r, get p() { return PEND[r]; }, get e() { return EDIT[r]; }, get bg() { return BGV[r] || ''; },
+           get reset() { return RESET.has(r); },
+           setP: v => opt(PEND, v), setE: (e, prev) => { opt(EDIT, e); opt(EP, e && prev); }, setBg: v => opt(BGV, v),
+           setReset: v => { if (v) RESET.add(r); else RESET.delete(r); }, setOp: v => opt(OP, v) };
+}
+document.addEventListener('click', e => { const b = e.target.closest('[data-pe]'); if (b) editPhoto('slot', b.dataset.pe); });
+// @ct-photo-insert
+</script>
+</body></html>

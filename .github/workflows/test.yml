@@ -1,0 +1,51 @@
+name: test
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: test-live
+  cancel-in-progress: false
+jobs:
+  test:
+    runs-on: ubuntu-24.04          # fixed image: the browser install must not change under us
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Python packages
+        run: pip install "numpy<3" "pillow<12" "opencv-python-headless<5"
+      - name: Static checks
+        run: |
+          node tests/test_static.js
+      - name: Enhance (stand-in models)
+        run: python3 tests/test_enhance.py
+      - name: Browser + npm copies of the models
+        run: |
+          mkdir -p "$RUNNER_TEMP/npm" "$RUNNER_TEMP/pw"
+          cd "$RUNNER_TEMP/npm"
+          npm pack onnxruntime-web@1.17.3 @rmbg/model-modnet@0.0.1 migan-onnx@1.0.0
+          for t in *.tgz; do mkdir -p "${t%.tgz}" && tar xzf "$t" -C "${t%.tgz}"; done
+          ls
+          cd "$RUNNER_TEMP/pw"
+          npm init -y > /dev/null
+          npm i playwright@1.47.2
+          npx playwright install --with-deps chromium
+      - name: Editor (headless Chromium, real models)
+        run: |
+          test -f "$RUNNER_TEMP/npm/onnxruntime-web-1.17.3/package/dist/ort.wasm.min.js"
+          test -f "$RUNNER_TEMP/npm/rmbg-model-modnet-0.0.1/package/modnet-1.onnx"
+          test -f "$RUNNER_TEMP/npm/migan-onnx-1.0.0/package/models/migan_pipeline_v2.onnx"
+          REQUIRE_MODELS=1 NPM_DIR="$RUNNER_TEMP/npm" PLAYWRIGHT="$RUNNER_TEMP/pw/node_modules/playwright" node tests/test_editor.js
+      - name: Move live to this commit
+        if: github.ref == 'refs/heads/main'
+        run: git push --force origin "HEAD:refs/heads/live"

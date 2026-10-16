@@ -1,0 +1,25 @@
+name: Rollback live
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: "Commit of main to put on live "
+        required: true
+permissions:
+  contents: write
+concurrency:
+  group: test-live
+  cancel-in-progress: false
+jobs:
+  rollback:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Put the commit on live
+        env:
+          C: ${{ inputs.commit }}
+        run: |
+          git merge-base --is-ancestor "$C" origin/main || { echo "not a commit of main: $C"; exit 1; }
+          git push --force origin "$C:refs/heads/live"
