@@ -13,7 +13,7 @@
 //             CT_PHOTO_OPT = { getAction: 'get', pollMs: 5000 } (values or functions)
 // The host calls: editPhoto, prepImage, isPhotoFile, editedPreview, afterEnhance, b64, ENH_ROLE, PHOTO_ACCEPT.
 // Never write slash-star or a closing script tag in this file (tests check it).
-const CT_PHOTO_VERSION = '2026-10-16.4';
+const CT_PHOTO_VERSION = '2026-10-16.5';
 // Default look of the ✎ dialog: every selector inside :where() (no weight) and the style put FIRST in <head>, so any CSS rule
 // of the host wins. Colours come from the host's --acc / --line when it has them.
 const CT_PHOTO_CSS = [
@@ -30,6 +30,7 @@ const CT_PHOTO_CSS = [
   ':where(#ed .bgb) { padding:4px 9px; font-size:12px; border:1px solid var(--line, #e3ded5); border-radius:7px; background:#fff; cursor:pointer; display:inline-flex; align-items:center; gap:4px; }',
   ':where(#ed .bgb.on) { border-color:var(--acc, #8a1c2b); background:var(--acc2, #f3e3e5); font-weight:600; }',
   ':where(#ed .bgb:disabled) { opacity:.5; cursor:default; }',
+  ':where(#ed label.bgb:has(input:disabled)) { opacity:.5; cursor:default; }',
   ':where(#ed .bgb input[type=color]) { width:26px; height:20px; padding:0; border:0; background:none; cursor:pointer; }',
   ':where(#ed .sw) { display:inline-block; width:12px; height:12px; border-radius:3px; border:1px solid #bbb; vertical-align:-2px; }',
   ':where(#ed .sz) { display:inline-block; padding:0 6px; border-radius:9px; font-size:10px; line-height:17px; color:#fff; background:rgba(0,0,0,.62); }',

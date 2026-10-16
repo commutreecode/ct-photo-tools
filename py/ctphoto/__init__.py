@@ -1,2 +1,2 @@
 """Photo tools (server side: enhance.py)."""
-__version__ = "2026-10-16.4"
+__version__ = "2026-10-16.5"

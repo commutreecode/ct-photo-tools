@@ -91,6 +91,7 @@ window.__backend = (action, args) => { window.__calls.push([action, JSON.parse(J
   ok(await page.$('#ed') === null && !(await page.evaluate(() => dirty)), 'Cancel: closed, no change');
   await page.evaluate(() => { window.__slow = 1500; });
   await page.click('[data-pe="hero"]'); await page.waitForSelector('#mkOn'); await wait(100);
+  ok(await page.$eval('#ed label.bgb', l => getComputedStyle(l).opacity === '0.5'), 'Colour choice greyed while the photo loads');
   ok(await page.$eval('#mkOn', b => b.disabled) && await page.$eval('#edR', b => b.disabled) && await page.$eval('#edA', b => b.disabled)
      && !(await page.$eval('#edC', b => b.disabled)), 'while the photo loads: tools wait, Cancel works');
   await page.waitForSelector('#edc', { timeout: 10000 }); await wait(100);
