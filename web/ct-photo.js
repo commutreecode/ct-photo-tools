@@ -13,9 +13,9 @@
 //             CT_PHOTO_OPT = { getAction: 'get', pollMs: 5000 } (values or functions)
 // The host calls: editPhoto, prepImage, isPhotoFile, editedPreview, afterEnhance, b64, ENH_ROLE, PHOTO_ACCEPT.
 // Never write slash-star or a closing script tag in this file (tests check it).
-const CT_PHOTO_VERSION = '2026-10-16.5';
+const CT_PHOTO_VERSION = '2026-10-16.6';
 // Default look of the ✎ dialog: every selector inside :where() (no weight) and the style put FIRST in <head>, so any CSS rule
-// of the host wins. Colours come from the host's --acc / --line when it has them.
+// of the host wins — except the last two rules: a hidden part of the dialog stays hidden whatever the host's CSS says. Colours come from the host's --acc / --line when it has them.
 const CT_PHOTO_CSS = [
   ':where(#ed.modal) { position:fixed; inset:0; background:rgba(20,18,16,.62); display:flex; align-items:center; justify-content:center; z-index:20; }',
   ':where(#ed .mbox) { background:#fff; color:#1d1b18; border-radius:12px; padding:14px 16px; width:min(800px, 96vw); max-height:96vh; overflow-y:auto; display:flex; flex-direction:column; gap:10px; box-sizing:border-box; }',
@@ -47,7 +47,9 @@ const CT_PHOTO_CSS = [
   ':where(#ed .cmp figure) { margin:0; text-align:center; color:#ddd; font-size:12px; }',
   ':where(#ed .cmp figcaption) { margin-top:4px; }',
   ':where(#ed .cmp canvas) { display:block; cursor:zoom-in; border-radius:4px; }',
-  ':where(#ed .cmp.z canvas) { cursor:zoom-out; }'
+  ':where(#ed .cmp.z canvas) { cursor:zoom-out; }',
+  '#ed [hidden] { display:none !important; }',
+  '#ed .mbox.cmpm .edt { display:none !important; }'
 ].join('\n');
 (function ctPhotoStyle() {
   if (typeof document === 'undefined' || !document.head || document.getElementById('ctPhotoCss')) return;

@@ -85,6 +85,8 @@ window.__backend = (action, args) => { window.__calls.push([action, JSON.parse(J
   ok(JSON.stringify((await calls('photo'))[0]) === '{"id":"P1","role":"hero","orig":false}', 'loads the full photo: photo {id, role, orig}');
   ok(await page.$$eval('#ed [data-bg]', b => b.length) === 7 && await page.$('#hdGo') && await page.$('#mkOn') && await page.$('#edR') && await page.$('#edL'),
      'rotate, background choices, ✨ Enhance HD, 🧽 Remove a mark');
+  ok(!(await page.isVisible('#mkTools')) && !(await page.isVisible('#cmpRow')) && !(await page.isVisible('#hdCmp')),
+     'hidden parts stay hidden even when the host CSS shows rows / spans (brush tools, Keep buttons)');
   ok(await page.$eval('#ed', e => getComputedStyle(e).position === 'fixed') && await page.$eval('#ed .mbox', e => getComputedStyle(e).backgroundColor === 'rgb(255, 255, 255)'),
      'the default style draws the dialog (host without own CSS)');
   await page.click('#edC'); await wait(100);
