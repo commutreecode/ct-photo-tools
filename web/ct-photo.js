@@ -11,7 +11,7 @@
 //   optional: CT_PHOTO_TEXT = { key: text } to use the host's own wording (keys: see ctT calls).
 // The host calls: editPhoto, prepImage, isPhotoFile, editedPreview, afterEnhance, b64, ENH_ROLE, PHOTO_ACCEPT.
 // Never write slash-star or a closing script tag in this file (tests check it).
-const CT_PHOTO_VERSION = '2026-10-16.2';
+const CT_PHOTO_VERSION = '2026-10-16.3';
 // Default look of the ✎ dialog: every selector inside :where() (no weight) and the style put FIRST in <head>, so any CSS rule
 // of the host wins. Colours come from the host's --acc / --line when it has them.
 const CT_PHOTO_CSS = [
@@ -409,6 +409,8 @@ async function editPhoto(kind, key) {
     ED = null; const m = $('#ed'); m && m.remove(); document.removeEventListener('keydown', onKey); };
   const onKey = ev => { if (ev.key === 'Escape') close(); };
   document.addEventListener('keydown', onKey);
+  const tools = on => document.querySelectorAll('#ed .edt button, #ed .edt input').forEach(b => { if (b.id !== 'edC') b.disabled = !on; });
+  tools(false);                                     // the tools wait for the photo (a click before it is there did nothing)
   $('#edC').onclick = close;
   $('#ed').addEventListener('click', ev => { if (ev.target.id === 'ed') close(); });
   let im;
@@ -432,6 +434,7 @@ async function editPhoto(kind, key) {
   $('#hdGo').onclick = hdStart;
   $('#hdCmp').onclick = hdReview;
   ED.close = close; ED.e0 = JSON.stringify(edValue());
+  tools(true);
   markEnh();
   $('#mkOn').onclick = () => setPaint(!ED.paint);
   document.querySelectorAll('#ed [data-br]').forEach(b => b.addEventListener('click', () => { ED.brush = Number(b.dataset.br); markPaint(); }));
@@ -661,7 +664,7 @@ function markPaint() {
   $('#mkm').textContent = !ED.paint ? (ED.clean ? 'Marks removed (' + ED.undo.length + '×). Check the photo, then Apply.' : '')
     : !ED.painted ? (auto ? 'Paint over the logo / text and a little around it. Only the logo (shown green) will change.'
                           : 'Paint exactly over the mark: everything painted will be filled in.')
-    : auto && !ED.det ? 'No logo colour found in the paint: paint a wider area around the logo, or choose "All painted".'
+    : auto && !ED.det ? 'Nothing to remove in "Only the logo": no logo colour found in the paint. Paint a wider area around the logo, or for a plain mark choose "All painted".'
     : auto ? 'Green = what will change. Click Remove (or paint more).' : 'Painted. Click Remove (or paint more).';
 }
 async function setPaint(on) {

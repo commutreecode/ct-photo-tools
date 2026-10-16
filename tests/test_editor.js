@@ -37,7 +37,8 @@ const PHOTO = '${PHOTO}';
 function reply(action, a) {
   const st = window.__state;
   switch (action) {
-    case 'photo': return { mime: 'image/jpeg', data: window.__photo || PHOTO, orig: !!a.orig && st.orig, hasOrig: st.orig };
+    case 'photo': { const r = { mime: 'image/jpeg', data: window.__photo || PHOTO, orig: !!a.orig && st.orig, hasOrig: st.orig };
+      return window.__slow ? new Promise(res => setTimeout(() => res(r), window.__slow)) : r; }
     case 'get': return { id: 'P1', status: st.status, enh: st.enh, updated: new Date().toISOString() };
     case 'enhance': st.status = 'Enhancing photo…'; return { ok: true };
     case 'bgreset': st.orig = false; return { ok: true };
@@ -88,6 +89,13 @@ window.__backend = (action, args) => { window.__calls.push([action, JSON.parse(J
      'the default style draws the dialog (host without own CSS)');
   await page.click('#edC'); await wait(100);
   ok(await page.$('#ed') === null && !(await page.evaluate(() => dirty)), 'Cancel: closed, no change');
+  await page.evaluate(() => { window.__slow = 1500; });
+  await page.click('[data-pe="hero"]'); await page.waitForSelector('#mkOn'); await wait(100);
+  ok(await page.$eval('#mkOn', b => b.disabled) && await page.$eval('#edR', b => b.disabled) && await page.$eval('#edA', b => b.disabled)
+     && !(await page.$eval('#edC', b => b.disabled)), 'while the photo loads: tools wait, Cancel works');
+  await page.waitForSelector('#edc', { timeout: 10000 }); await wait(100);
+  ok(!(await page.$eval('#mkOn', b => b.disabled)) && !(await page.$eval('#edR', b => b.disabled)), 'photo there: tools ready');
+  await page.evaluate(() => { window.__slow = 0; }); await page.click('#edC'); await wait(100);
 
   console.log('3 rotate + Apply');
   await openEd();
