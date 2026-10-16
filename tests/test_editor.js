@@ -27,6 +27,9 @@ const py = code => cp.execFileSync('python3', ['-c', code]).toString().trim();
 const PHOTO = py('import io,base64;from PIL import Image,ImageDraw;im=Image.new("RGB",(900,1100),(206,190,170));d=ImageDraw.Draw(im);' +
   'd.ellipse((300,120,600,440),fill=(120,95,75));d.rounded_rectangle((120,520,780,1300),radius=160,fill=(90,105,125));' +
   'd.rectangle((180,960,720,1010),fill=(235,60,140));b=io.BytesIO();im.save(b,"JPEG",quality=92);print(base64.b64encode(b.getvalue()).decode())');
+const TPNG = py('import io,base64;from PIL import Image,ImageDraw;im=Image.new("RGBA",(900,1100),(0,0,0,0));d=ImageDraw.Draw(im);' +
+  'd.ellipse((300,120,600,440),fill=(120,95,75,255));d.rounded_rectangle((120,520,780,1300),radius=160,fill=(90,105,125,255));' +
+  'b=io.BytesIO();im.save(b,"PNG");print(base64.b64encode(b.getvalue()).decode())');
 const ENH = py('import io,base64;from PIL import Image;im=Image.open(io.BytesIO(base64.b64decode("' + PHOTO + '"))).convert("RGB");' +
   'im=im.resize((im.width*2,im.height*2));b=io.BytesIO();im.save(b,"JPEG",quality=90);print(base64.b64encode(b.getvalue()).decode())');
 
@@ -37,7 +40,7 @@ const PHOTO = '${PHOTO}';
 function reply(action, a) {
   const st = window.__state;
   switch (action) {
-    case 'photo': { const r = { mime: 'image/jpeg', data: window.__photo || PHOTO, orig: !!a.orig && st.orig, hasOrig: st.orig };
+    case 'photo': { const r = { mime: window.__mime || 'image/jpeg', data: window.__photo || PHOTO, orig: !!a.orig && st.orig, hasOrig: st.orig };
       return window.__slow ? new Promise(res => setTimeout(() => res(r), window.__slow)) : r; }
     case 'get': case 'get2': return { id: 'P1', status: st.status, enh: st.enh, updated: new Date().toISOString() };
     case 'enhance': st.status = 'Enhancing photo…'; return { ok: true };
@@ -83,8 +86,10 @@ window.__backend = (action, args) => { window.__calls.push([action, JSON.parse(J
   console.log('2 the dialog');
   await openEd();
   ok(JSON.stringify((await calls('photo'))[0]) === '{"id":"P1","role":"hero","orig":false}', 'loads the full photo: photo {id, role, orig}');
-  ok(await page.$$eval('#ed [data-bg]', b => b.length) === 7 && await page.$('#hdGo') && await page.$('#mkOn') && await page.$('#edR') && await page.$('#edL'),
+  ok(await page.$$eval('#ed [data-bg]', b => b.length) === 8 && await page.$('#hdGo') && await page.$('#mkOn') && await page.$('#edR') && await page.$('#edL'),
      'rotate, background choices, ✨ Enhance HD, 🧽 Remove a mark');
+  ok(await page.$eval('#ed [data-bg="none"]', b => /Transparent/.test(b.textContent) && !!b.querySelector('.sw.ck')
+     && getComputedStyle(b.querySelector('.sw.ck')).backgroundImage.includes('gradient')), 'Transparent choice with a checkerboard swatch');
   ok(!(await page.isVisible('#mkTools')) && !(await page.isVisible('#cmpRow')) && !(await page.isVisible('#hdCmp')),
      'hidden parts stay hidden even when the host CSS shows rows / spans (brush tools, Keep buttons)');
   ok(await page.$eval('#ed', e => getComputedStyle(e).position === 'fixed') && await page.$eval('#ed .mbox', e => getComputedStyle(e).backgroundColor === 'rgb(255, 255, 255)'),
@@ -107,6 +112,34 @@ window.__backend = (action, args) => { window.__calls.push([action, JSON.parse(J
   ok(await page.evaluate(() => dirty && EDIT.hero && EDIT.hero.rotate === 90), 'Apply: rotate 90 kept as a number, page marked changed');
   ok(await page.evaluate(() => window.__renders > 0), 'the host redraws');
 
+  console.log('3b see-through photos (no model needed)');
+  ok(await page.evaluate(() => {
+    const c = document.createElement('canvas'); c.width = 300; c.height = 400; const x = c.getContext('2d');
+    x.fillStyle = '#7a6050'; x.fillRect(100, 100, 100, 300);                    // a "person", the rest see-through
+    const o = document.createElement('canvas'); o.width = 300; o.height = 400; const y = o.getContext('2d');
+    y.fillStyle = '#fff'; y.fillRect(0, 0, 300, 400); y.drawImage(c, 0, 0);
+    const a = photoFromCanvas(c, 'hero.jpg'), b = photoFromCanvas(o, 'hero.jpg');
+    return a.name === 'hero.png' && a.mime === 'image/png' && /^data:image\/png/.test(a.preview) && a.info.bg
+      && b.name === 'hero.jpg' && b.mime === 'image/jpeg' && /^data:image\/jpeg/.test(b.preview);
+  }), 'photoFromCanvas: see-through -> PNG <role>.png (+ PNG preview), opaque -> JPEG as before');
+  ok(await page.evaluate(async () => {
+    const im = await loadUrl(dataUrl({ mime: 'image/jpeg', data: PHOTO }));
+    const u = await editedPreview(im.src, { trim: [0.1234, 0.0567, 0.8765, 0.9321] });
+    return /^data:image\/jpeg/.test(u) && !hasAlpha(im);
+  }), 'an opaque photo with a fractional crop stays JPEG (soft crop edge is not "see-through")');
+  ok(await page.evaluate(() => { const c = document.createElement('canvas'); c.width = 200; c.height = 200;
+    const x = c.getContext('2d'); x.fillStyle = '#123456'; x.fillRect(0, 0, 200, 200);
+    return compose(c, c, 'none').getContext('2d').getImageData(0, 0, 1, 1).data[3] === 255
+      && compose(c, document.createElement('canvas'), 'none').getContext('2d').getImageData(5, 5, 1, 1).data[3] === 0; }),
+     "compose(…, 'none'): no background (only the person's matte decides)");
+  await page.evaluate(p => { window.__photo = p; window.__mime = 'image/png'; BGV.hero = 'none'; }, TPNG);
+  await openEd();
+  const ck = await page.evaluate(() => { const c = $('#edc'), x = c.getContext('2d'); const p = (u, v) => [...x.getImageData(Math.round(u * c.width), Math.round(v * c.height), 1, 1).data];
+    return [p(0.02, 0.02), p(0.02, 0.02 + 10 / c.height)]; });
+  ok(ck[0][3] === 255 && ck.every(q => q[0] > 190) && ck[0][0] !== ck[1][0] && await page.$eval('#ed [data-bg="none"]', b => b.classList.contains('on')),
+     'a saved see-through photo opens on squares, "Transparent" marked: ' + JSON.stringify(ck.map(q => q[0])));
+  await page.click('#edC'); await page.evaluate(() => { window.__photo = ''; window.__mime = ''; delete BGV.hero; }); await wait(100);
+
   console.log('4 ✨ Enhance HD');
   await fresh(); await openEd();
   await page.evaluate(() => { dirty = true; });
@@ -126,6 +159,21 @@ window.__backend = (action, args) => { window.__calls.push([action, JSON.parse(J
   await page.waitForFunction(() => window.__calls.some(c => c[0] === 'bgreset'), null, { timeout: 10000 });
   ok(JSON.stringify((await calls('bgreset'))[0]) === '{"id":"P1","role":"hero"}', 'Keep the photo before (= the original): bgreset {id, role}');
 
+  console.log('4b ✨ Enhance HD of a see-through photo with a background change saved before: Keep before -> PNG again');
+  await fresh();
+  await page.evaluate(p => { window.__photo = p; window.__mime = 'image/png'; HASORIG.hero = true; BGV.hero = 'none'; window.__state.orig = true; }, TPNG);
+  await openEd();
+  await page.click('#hdGo');
+  await page.waitForFunction(() => window.__calls.some(c => c[0] === 'enhance')); await wait(200);
+  await page.evaluate(e => { window.__photo = e; window.__mime = 'image/jpeg'; Object.assign(window.__state, { status: 'Saved', enh: { role: 'hero', st: 'Done', faces: 1 } });
+    INFO.hero = { w: 1800, h: 2200, b: 1, enh: 2, hd: 1 }; }, ENH);
+  await page.waitForSelector('#ed .cmp canvas', { timeout: 20000 }); await wait(300);
+  await page.click('#cmpB');
+  await page.waitForFunction(() => window.__calls.some(c => c[0] === 'upload'), null, { timeout: 10000 });
+  const up = (await calls('upload'))[0];
+  ok(up.name === 'hero.png' && up.mime === 'image/png' && up.info.bg, 'the photo before (PNG) uploaded again as hero.png, image/png: ' + up.name + ' ' + up.mime);
+  await page.evaluate(() => { window.__photo = ''; window.__mime = ''; });
+
   if (haveModel) {
     console.log('5 background (MODNet, real model)');
     await fresh(); await openEd();
@@ -135,7 +183,24 @@ window.__backend = (action, args) => { window.__calls.push([action, JSON.parse(J
     ok(px.every(v => v > 235), 'corner of the photo is white now: ' + px.join(','));
     await page.click('#edA');
     await page.waitForFunction(() => !document.querySelector('#ed'), null, { timeout: 30000 });
-    ok(await page.evaluate(() => !!PEND.hero && BGV.hero === '#ffffff' && dirty), 'Apply: new photo waits for Save (PEND), background kept');
+    ok(await page.evaluate(() => !!PEND.hero && BGV.hero === '#ffffff' && dirty && PEND.hero.mime === 'image/jpeg' && PEND.hero.name === 'hero.jpg'),
+       'Apply: new photo waits for Save (PEND, JPEG hero.jpg), background kept');
+
+    console.log('5b Transparent (MODNet, real model)');
+    await fresh(); await openEd();
+    await page.click('#ed [data-bg="none"]');
+    await page.waitForFunction(() => ED && !ED.busy && ED.bg === 'none', null, { timeout: 180000 });
+    const tp = await page.evaluate(() => { const c = $('#edc'), x = c.getContext('2d'), d = ED.disp.getContext('2d');
+      return { shown: [...x.getImageData(4, 4, 1, 1).data], corner: d.getImageData(4, 4, 1, 1).data[3],
+               face: d.getImageData(450, 280, 1, 1).data[3], alpha: hasAlpha(ED.disp) }; });
+    ok(tp.alpha && tp.corner < 30 && tp.face > 220 && tp.shown[3] === 255 && tp.shown[0] > 190,
+       'the background is gone (corner see-through, face kept), squares shown behind: ' + JSON.stringify(tp));
+    await page.click('#edA');
+    await page.waitForFunction(() => !document.querySelector('#ed'), null, { timeout: 30000 });
+    const pend = await page.evaluate(() => { const p = PEND.hero; return p && { name: p.name, mime: p.mime, prev: p.preview.slice(0, 14),
+      bgOrig: !!p.bgOrig, sig: atob(p.data.slice(0, 12)).slice(1, 4), bg: BGV.hero, op: !!EP.hero }; });
+    ok(pend && pend.name === 'hero.png' && pend.mime === 'image/png' && pend.sig === 'PNG' && pend.prev === 'data:image/png' && pend.bg === 'none',
+       'Apply: uploaded as PNG hero.png with alpha, BGV "none": ' + JSON.stringify(pend));
   } else console.log('5 background: skipped (no local model copies, set NPM_DIR)');
 
   if (haveMigan) {

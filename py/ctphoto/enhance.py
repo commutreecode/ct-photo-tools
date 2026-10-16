@@ -3,7 +3,7 @@
     photo -> Real-ESRGAN x2 (only when its long side <= UPSCALE_MAX: small / blurred photos)
           -> every face (up to MAX_FACES; OpenCV Haar finder + 2DFAN4 landmarks) rebuilt by GFPGAN 1.4 at 512 px,
              mixed BLEND rebuilt + (1 - BLEND) original so the person still looks like themself, pasted back softly
-          -> JPEG
+          -> JPEG (a see-through photo: PNG, its alpha channel resized to the new size)
 
 Models (onnx copies in the facefusion-assets release on GitHub, checked by SHA-256 before use):
     Real-ESRGAN x2plus  BSD-3-Clause (xinntao/Real-ESRGAN)
@@ -11,7 +11,7 @@ Models (onnx copies in the facefusion-assets release on GitHub, checked by SHA-2
     2DFAN4              BSD-3-Clause (1adrianb/face-alignment)
 The face finder is OpenCV's own (BSD). No model with a non-commercial licence is used.
 
-    PYTHONPATH=py python3 -m ctphoto.enhance in.jpg out.jpg   (models are downloaded to $CTPHOTO_MODELS or ~/.cache/ctphoto-models;
+    PYTHONPATH=py python3 -m ctphoto.enhance in.jpg out.jpg   (a see-through input is written as out.png; models are downloaded to $CTPHOTO_MODELS or ~/.cache/ctphoto-models;
     set CTPHOTO_MODELS to a cached folder)
 """
 from __future__ import annotations
@@ -137,10 +137,11 @@ class Enhancer:
 
     # ---------------------------------------------------------------- all
     def run(self, src: Path, dst: Path, progress=None) -> dict:
+        """Enhance src -> dst. Returns {w, h, scale, faces, seconds, path, mime}: path = the file written (dst; for a
+        see-through input dst with the suffix .png, alpha kept), mime = its type."""
         import cv2
         import numpy as np
-        from PIL import Image, ImageOps
-        im = ImageOps.exif_transpose(Image.open(src)).convert("RGB")       # HEIC / PNG / WEBP … all read by Pillow
+        im, alpha = read_photo(src)
         img = np.array(im)[:, :, ::-1].copy()
         t0, scale = time.time(), 1
         if max(img.shape[:2]) <= UPSCALE_MAX:
@@ -154,9 +155,39 @@ class Enhancer:
                 pass
             if progress:
                 progress(0.7 + 0.3 * (k + 1) / len(boxes))
-        Path(dst).parent.mkdir(parents=True, exist_ok=True)
-        cv2.imwrite(str(dst), img, [cv2.IMWRITE_JPEG_QUALITY, 93])
-        return {"w": img.shape[1], "h": img.shape[0], "scale": scale, "faces": len(boxes), "seconds": round(time.time() - t0, 1)}
+        dst = Path(dst)
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        if alpha is not None:                       # see-through: the alpha channel at the new size, saved as PNG
+            from PIL import Image
+            a = np.asarray(alpha.resize((img.shape[1], img.shape[0]), Image.LANCZOS))
+            dst = dst.with_suffix(".png")
+            if not cv2.imwrite(str(dst), np.dstack([img, a])):
+                raise RuntimeError(f"could not write {dst}")
+            mime = "image/png"
+        else:
+            if not cv2.imwrite(str(dst), img, [cv2.IMWRITE_JPEG_QUALITY, 93]):
+                raise RuntimeError(f"could not write {dst}")
+            mime = "image/jpeg"
+        return {"w": img.shape[1], "h": img.shape[0], "scale": scale, "faces": len(boxes), "seconds": round(time.time() - t0, 1),
+                "path": str(dst), "mime": mime}
+
+
+def read_photo(src: Path):
+    """(RGB image, alpha or None). A see-through photo (some alpha < 255) gets its alpha back separately; its colour is
+    worked on with the empty part white: pixels below alpha 64 fade to white, the rest keep their own colour, so the
+    models never see the black that see-through pixels usually carry, and soft edges (hair) keep their colour."""
+    import numpy as np
+    from PIL import Image, ImageOps
+    im = ImageOps.exif_transpose(Image.open(src))                       # HEIC / PNG / WEBP … all read by Pillow
+    if im.mode == "P" and "transparency" in im.info or im.mode in ("RGBA", "LA", "PA", "RGBa", "La"):
+        im = im.convert("RGBA")
+        alpha = im.getchannel("A")
+        if alpha.getextrema()[0] < 255:
+            rgb = np.asarray(im.convert("RGB"), np.float32)
+            k = np.clip(np.asarray(alpha, np.float32) / 64, 0, 1)[:, :, None]
+            rgb = rgb * k + 255 * (1 - k)
+            return Image.fromarray(rgb.round().astype(np.uint8)), alpha
+    return im.convert("RGB"), None
 
 
 if __name__ == "__main__":

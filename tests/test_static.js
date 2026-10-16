@@ -16,4 +16,13 @@ const missingInHead = checked.filter(nm => !new RegExp('[\\s,(]' + nm.replace('$
 ok(checked.length >= 20 && !missingInHead.length, 'every checked host name is documented in the header: ' + (missingInHead.join(',') || 'all'));
 const pyv = /__version__ = "([^"]+)"/.exec(fs.readFileSync(path.join(root, 'py', 'ctphoto', '__init__.py'), 'utf8'))[1];
 ok(js.includes("const CT_PHOTO_VERSION = '" + pyv + "';"), 'web and py versions agree: ' + pyv);
+ok(/\['none', 'Transparent'\]/.test(js) && /bg !== 'none'/.test(js), "background choice 'none' (Transparent): compose() leaves the background empty");
+ok(/image\/png/.test(js.slice(js.indexOf('function photoFromCanvas'), js.indexOf('async function edApply'))),
+   'photoFromCanvas can upload a PNG (see-through photo)');
+const enh = fs.readFileSync(path.join(root, 'py', 'ctphoto', 'enhance.py'), 'utf8');
+ok(/"path": str\(dst\), "mime": mime/.test(enh), 'enhance.run() returns the path + mime of the file it wrote');
+const words = ['commu' + 'tree', 'apps ' + 'script', 'google ' + 'drive', 'spread' + 'sheet', 'vid' + 'eo', 'pro' + 'file', 'te' + 'am'];
+const all = [js, enh, fs.readFileSync(path.join(root, 'README.md'), 'utf8')].join('\n').toLowerCase();
+const found = words.filter(w => new RegExp('\\b' + w + '\\b').test(all));
+ok(!found.length, 'neutral wording (no host names): ' + (found.join(',') || 'none found'));
 console.log(`static: ${n} checks passed`);

@@ -53,6 +53,29 @@ with tempfile.TemporaryDirectory() as t:
     r = en.run(src, dst)
     check(r["scale"] == 1 and Image.open(dst).size == (1000, 1300) and check.n_up == 0, "a photo above UPSCALE_MAX is not upscaled")
 
+    check(r["path"] == str(dst) and r["mime"] == "image/jpeg", "an opaque photo: JPEG at dst, path + mime returned")
+
+    # a see-through photo (person cut out, "Transparent"): enhanced on white, alpha kept, saved as PNG
+    a = np.zeros((401, 301), np.uint8); a[100:300, 80:220] = 255; a[100:300, 70:80] = 128      # soft left edge
+    rgba = np.dstack([rng.integers(0, 255, (401, 301, 3), dtype=np.uint8), a]); rgba[a == 0, :3] = 0   # see-through = black
+    srcp = Path(t) / "cut.png"
+    Image.fromarray(rgba, "RGBA").save(srcp)
+    seen = []
+    up0 = en.up.run
+    en.up.run = lambda _, feed: (seen.append(feed["input"]), up0(_, feed))[1]
+    r = en.run(srcp, dst)
+    en.up.run = up0
+    out = Image.open(r["path"])
+    check(r["path"] == str(dst.with_suffix(".png")) and r["mime"] == "image/png" and out.mode == "RGBA" and out.size == (602, 802),
+          f"see-through photo -> PNG with alpha, x2: {r['path']} {out.mode} {out.size}")
+    oa = np.asarray(out.getchannel("A"))
+    check(oa[10, 10] == 0 and oa[400, 300] == 255 and 60 < oa[400, 150] < 200, "alpha resized with the photo: empty 0, person 255, soft edge kept")
+    check(float(seen[0][:, :, :20, :20].min()) > 0.99, "the models see white (not black) where the photo is see-through")
+    q = Path(t) / "solid.png"
+    Image.fromarray(np.dstack([rgba[:, :, :3], np.full((401, 301), 255, np.uint8)]), "RGBA").save(q)
+    r = en.run(q, dst)
+    check(r["path"] == str(dst) and Image.open(dst).mode == "RGB", "a PNG without see-through pixels stays a JPEG as before")
+
     img = np.full((600, 500, 3), 180, np.uint8)
     pts = en.landmarks5(img, (150, 150, 200, 200))
     check(pts.shape == (5, 2) and pts[0][0] < pts[1][0] and pts[3][1] > pts[0][1], "5 face points from the 68 (eyes, nose, mouth)")

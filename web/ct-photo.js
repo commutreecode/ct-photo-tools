@@ -13,7 +13,7 @@
 //             CT_PHOTO_OPT = { getAction: 'get', pollMs: 5000 } (values or functions)
 // The host calls: editPhoto, prepImage, isPhotoFile, editedPreview, afterEnhance, b64, ENH_ROLE, PHOTO_ACCEPT.
 // Never write slash-star or a closing script tag in this file (tests check it).
-const CT_PHOTO_VERSION = '2026-10-16.6';
+const CT_PHOTO_VERSION = '2026-10-16.7';
 // Default look of the ✎ dialog: every selector inside :where() (no weight) and the style put FIRST in <head>, so any CSS rule
 // of the host wins — except the last two rules: a hidden part of the dialog stays hidden whatever the host's CSS says. Colours come from the host's --acc / --line when it has them.
 const CT_PHOTO_CSS = [
@@ -33,6 +33,7 @@ const CT_PHOTO_CSS = [
   ':where(#ed label.bgb:has(input:disabled)) { opacity:.5; cursor:default; }',
   ':where(#ed .bgb input[type=color]) { width:26px; height:20px; padding:0; border:0; background:none; cursor:pointer; }',
   ':where(#ed .sw) { display:inline-block; width:12px; height:12px; border-radius:3px; border:1px solid #bbb; vertical-align:-2px; }',
+  ':where(#ed .sw.ck) { background:repeating-conic-gradient(#c9c9c9 0 25%, #fff 0 50%) 0 0 / 6px 6px; }',
   ':where(#ed .sz) { display:inline-block; padding:0 6px; border-radius:9px; font-size:10px; line-height:17px; color:#fff; background:rgba(0,0,0,.62); }',
   ':where(#ed .sz.g) { background:#1f7a3f; } :where(#ed .sz.a) { background:#b26a00; } :where(#ed .sz.r) { background:#b3261e; }',
   ':where(#ed .edprog) { display:flex; align-items:center; gap:8px; font-size:12px; color:var(--acc, #8a1c2b); }',
@@ -100,16 +101,44 @@ function ctPhotoCheck() {          // the names of the host contract that are mi
 // trim = [x0, y0, x1, y1]
 // fractions of the rotated photo. Background: the person is cut out in the browser (MODNet portrait matting, onnxruntime-web,
 // loaded on first use) and put on a plain colour or a soft blur. 🧽 Mark / logo: MI-GAN fills a painted part in the browser.
-// ✨ Enhance HD: done by the host's backend (action enhance). A changed photo is uploaded as a new JPEG; the backend keeps
+// ✨ Enhance HD: done by the host's backend (action enhance). A changed photo is uploaded as a new JPEG (PNG when see-through); the backend keeps
 // the photo as uploaded: "Original" (bgreset) brings it back. Works on a photo box (kind 'slot') and a gallery tile (kind 'gal').
+// "Transparent" ('none') keeps only the person: the photo is uploaded as a PNG <role>.png with an alpha channel.
 let ED = null;
 const FULL = [0, 0, 1, 1];
 const trimRight = t => [1 - t[3], t[0], 1 - t[1], t[2]];      // the same part of the photo after rotating 90° clockwise
 const trimLeft = t => [t[1], 1 - t[2], t[3], 1 - t[0]];       // ... after rotating 90° anti-clockwise
 const BGS = [['', 'Original'], ['#ffffff', 'White'], ['#f4efe6', 'Cream'], ['#e9e9e9', 'Light grey'], ['#dfe9f4', 'Light blue'],
-             ['#f6e4e9', 'Light pink'], ['blur', 'Soft blur']];
+             ['#f6e4e9', 'Light pink'], ['blur', 'Soft blur'], ['none', 'Transparent']];
 const dims = im => [im.naturalWidth || im.width, im.naturalHeight || im.height];
 const dataUrl = p => `data:${p.mime};base64,${p.data}`;
+// true = the image / canvas is see-through in places (checked once on a small copy, remembered per image): more than 3 %
+// of it below alpha 200, so a soft edge left by a fractional crop does not count, a cut-out person always does.
+const ALPHA = new WeakMap();
+function hasAlpha(im) {
+  if (!im) return false;
+  if (ALPHA.has(im)) return ALPHA.get(im);
+  let r = false;
+  try {
+    const [w, h] = dims(im), k = Math.min(1, 128 / Math.max(w, h));
+    const c = document.createElement('canvas'); c.width = Math.max(1, Math.round(w * k)); c.height = Math.max(1, Math.round(h * k));
+    const x = c.getContext('2d'); x.drawImage(im, 0, 0, c.width, c.height);
+    const d = x.getImageData(0, 0, c.width, c.height).data;
+    let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i] < 200) n++;
+    r = n > 0.03 * d.length / 4;
+  } catch (e) { r = false; }
+  ALPHA.set(im, r);
+  return r;
+}
+// A canvas as a data URL: PNG when it has see-through pixels (a JPEG would turn them black), else JPEG.
+const canvasUrl = (c, q) => hasAlpha(c) ? c.toDataURL('image/png') : c.toDataURL('image/jpeg', q);
+// Grey / white squares behind a see-through photo (w x h px of the context x).
+function drawChecker(x, w, h) {
+  const s = 10;
+  x.save(); x.fillStyle = '#ffffff'; x.fillRect(0, 0, w, h); x.fillStyle = '#c9c9c9';
+  for (let y = 0; y < h; y += s) for (let i = ((y / s) % 2) * s; i < w; i += 2 * s) x.fillRect(i, y, s, s);
+  x.restore();
+}
 function loadUrl(url) {
   return new Promise((res, rej) => { const im = new Image(); im.onload = () => res(im); im.onerror = () => rej(new Error('decode')); im.src = url; });
 }
@@ -127,7 +156,7 @@ function drawEdited(im, rot, trim, max) {
 }
 async function editedPreview(url, e) {
   const im = await loadUrl(url);
-  return drawEdited(im, e.rotate || 0, e.trim, 240).toDataURL('image/jpeg', 0.85);
+  return canvasUrl(drawEdited(im, e.rotate || 0, e.trim, 240), 0.85);
 }
 // ---- background tool: MODNet (Apache-2.0) in the browser, files from jsdelivr (exact versions, cached by the browser)
 const ORT_URL = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.17.3/dist/';
@@ -226,7 +255,7 @@ async function matteOf(im, onPct) {
   const bx = big.getContext('2d'); bx.imageSmoothingQuality = 'high'; bx.drawImage(c, 0, 0, W, H);
   return big;
 }
-// The photo on a new background: a colour ('#rrggbb') or 'blur' (the photo itself, softly blurred).
+// The photo on a new background: a colour ('#rrggbb'), 'blur' (the photo itself, softly blurred) or 'none' (see-through).
 function compose(im, matte, bg) {
   const [W, H] = dims(im);
   const out = document.createElement('canvas'); out.width = W; out.height = H;
@@ -236,7 +265,7 @@ function compose(im, matte, bg) {
     sm.width = Math.max(1, Math.round(W / f)); sm.height = Math.max(1, Math.round(H / f));
     const sx = sm.getContext('2d'); sx.imageSmoothingQuality = 'high'; sx.drawImage(im, 0, 0, sm.width, sm.height);
     o.imageSmoothingQuality = 'high'; o.drawImage(sm, 0, 0, W, H);
-  } else { o.fillStyle = bg; o.fillRect(0, 0, W, H); }
+  } else if (bg !== 'none') { o.fillStyle = bg; o.fillRect(0, 0, W, H); }
   const fg = document.createElement('canvas'); fg.width = W; fg.height = H;
   const g = fg.getContext('2d'); g.drawImage(im, 0, 0, W, H); g.globalCompositeOperation = 'destination-in';
   g.imageSmoothingQuality = 'high'; g.drawImage(matte, 0, 0, W, H);
@@ -386,7 +415,8 @@ async function editPhoto(kind, key) {
   const info = p ? p.info : INFO[role], enh0 = (!p && !T.reset && Number((info || {}).enh)) || 0;
   const hasOrig = !!(role && HASORIG[role] && !T.reset);
   if (p && !p.preview) return toast("This photo (HEIC / TIFF) can't be edited here. Save it as JPG on the phone/PC first.", true);
-  const sw = ([v, l]) => `<button type="button" class="bgb" data-bg="${v}">${v && v !== 'blur' ? `<i class="sw" style="background:${v}"></i>` : ''}${l}</button>`;
+  const sw = ([v, l]) => `<button type="button" class="bgb" data-bg="${v}">${v === 'none' ? '<i class="sw ck"></i>'
+    : v && v !== 'blur' ? `<i class="sw" style="background:${v}"></i>` : ''}${l}</button>`;
   $('body').insertAdjacentHTML('beforeend', `<div class="modal" id="ed"><div class="mbox">
     <div class="row" style="justify-content:space-between"><b>Rotate / crop / background / enhance / remove a mark</b><span class="hint">${esc(ctT('editHint', ''))}</span></div>
     <div class="stage" id="edst">Loading photo…</div>
@@ -622,6 +652,7 @@ function cmpDraw() {
   [[c.a, '#cmpa'], [c.b, '#cmpb']].forEach(([im, sel]) => {
     const cv = $(sel), [iw, ih] = dims(im), x = cv.getContext('2d');
     cv.width = cw; cv.height = ch; x.imageSmoothingQuality = 'high';
+    if (hasAlpha(im)) drawChecker(x, cw, ch);
     if (!c.z) return x.drawImage(im, 0, 0, cw, ch);
     const sw = iw / Z, sh = ih / Z;                                   // the same part of both photos (fractions)
     const sx = Math.min(iw - sw, Math.max(0, c.z[0] * iw - sw / 2)), sy = Math.min(ih - sh, Math.max(0, c.z[1] * ih - sh / 2));
@@ -638,7 +669,8 @@ async function cmpKeep(before) {
     if (ed.cmp.mode === 'enhanced' && ed.hd && ed.hd.hadOrig) {     // the photo before was itself changed (e.g. a background):
       const [h, data] = ed.im.src.split(','), mime = (h.match(/^data:([^;]+)/) || [])[1] || 'image/jpeg';   // upload it again
       const [w, hh] = dims(ed.im);
-      await api('upload', { id: P.id, role, name: role + '.jpg', mime, data, info: { w, h: hh, b: Math.round(data.length * 0.75), bg: true } });
+      await api('upload', { id: P.id, role, name: role + (mime === 'image/png' ? '.png' : '.jpg'), mime, data,
+                            info: { w, h: hh, b: Math.round(data.length * 0.75), bg: true } });
     } else {
       await api('bgreset', { id: P.id, role });
       if (ed.cmp.mode === 'review' && ed.bg0) { ed.T.setBg(''); markDirty(); }    // the background went with it
@@ -758,6 +790,7 @@ function edDraw() {
   const k = Math.min(maxW / rw, maxH / rh);
   c.width = Math.round(rw * k); c.height = Math.round(rh * k);
   const x = c.getContext('2d');
+  if (hasAlpha(ED.disp)) drawChecker(x, c.width, c.height);      // see-through photo: squares behind the person
   x.save(); x.translate(c.width / 2, c.height / 2); x.rotate(ED.rot * Math.PI / 180); x.drawImage(ED.disp, -iw * k / 2, -ih * k / 2, iw * k, ih * k);
   if (ED.paint && ED.mask) {
     x.globalAlpha = ED.mmode === 'auto' ? 0.3 : 0.55; x.drawImage(ED.mask, -iw * k / 2, -ih * k / 2, iw * k, ih * k);
@@ -866,12 +899,16 @@ function edWire(c) {
 }
 
 // A photo object (like prepImage) from a canvas: the photo with its new background / enhanced, full size.
+// A see-through canvas ("Transparent") is uploaded as a PNG <role>.png (alpha kept), every other one as a JPEG.
 function photoFromCanvas(c, name) {
-  const url = c.toDataURL('image/jpeg', 0.92), [w, h] = dims(c);
+  const png = hasAlpha(c), [w, h] = dims(c);
+  const url = png ? c.toDataURL('image/png') : c.toDataURL('image/jpeg', 0.92);
   const t = document.createElement('canvas'), tk = 240 / Math.max(w, h);
   t.width = Math.round(w * tk); t.height = Math.round(h * tk); t.getContext('2d').drawImage(c, 0, 0, t.width, t.height);
   const data = url.split(',')[1];
-  return { name, mime: 'image/jpeg', data, preview: t.toDataURL('image/jpeg', 0.8), info: { w, h, b: Math.round(data.length * 0.75), bg: true } };
+  if (png) name = String(name || 'photo').replace(/\.[^.]*$/, '') + '.png';
+  return { name, mime: png ? 'image/png' : 'image/jpeg', data, preview: png ? t.toDataURL('image/png') : t.toDataURL('image/jpeg', 0.8),
+           info: { w, h, b: Math.round(data.length * 0.75), bg: true } };
 }
 
 async function edApply() {
@@ -905,7 +942,7 @@ async function edApply() {
       T.setP(np); T.setReset(false); T.setBg(ed.bg); T.setOp(null);
     }
   }
-  const prev = e ? drawEdited(ed.disp, e.rotate || 0, e.trim, 240).toDataURL('image/jpeg', 0.85) : '';
+  const prev = e ? canvasUrl(drawEdited(ed.disp, e.rotate || 0, e.trim, 240), 0.85) : '';
   if (changed || JSON.stringify(T.e || null) !== JSON.stringify(e)) { changed = true; T.setE(e, prev); }
   if (!changed) return;
   if (ed.clean || ed.bg !== ed.bg0 || T.reset) ed.info = T.p ? T.p.info : ed.info;
