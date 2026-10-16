@@ -5,13 +5,15 @@
 // HOST CONTRACT — the page must define these names (checked by ctPhotoCheck() when the dialog opens):
 //   data   : P (record: id, status), EP, THUMB, INFO, HASORIG, GAL, BUSY (RegExp), dirty
 //   actions: api(action, args) -> Promise, toast(msg), esc(s), $(sel), render(), markDirty(), refreshSide(), reload(),
-//            loadThumbs(), startPoll(), isBusy(P), stuck(P), level(info, edit), usedLong(info, edit), isLogo(role),
+//            loadThumbs(), startPoll(), isBusy(P), stuck(P), level(info, edit, [w, h]), usedLong(info, edit, [w, h]), isLogo(role),
 //            edTarget(kind, key) -> { role, get() / set() … } (which photo box / gallery tile is edited)
+//            ([w, h] = the photo in the dialog, before rotation)
 //   backend: actions photo {id, role, orig}, bgreset {id, role}, enhance {id, role}, get {id}; uploads go through the host.
-//   optional: CT_PHOTO_TEXT = { key: text } to use the host's own wording (keys: see ctT calls).
+//   optional: CT_PHOTO_TEXT = { key: text } the host's own wording (keys: see ctT calls);
+//             CT_PHOTO_OPT = { getAction: 'get', pollMs: 5000 } (values or functions)
 // The host calls: editPhoto, prepImage, isPhotoFile, editedPreview, afterEnhance, b64, ENH_ROLE, PHOTO_ACCEPT.
 // Never write slash-star or a closing script tag in this file (tests check it).
-const CT_PHOTO_VERSION = '2026-10-16.3';
+const CT_PHOTO_VERSION = '2026-10-16.4';
 // Default look of the ✎ dialog: every selector inside :where() (no weight) and the style put FIRST in <head>, so any CSS rule
 // of the host wins. Colours come from the host's --acc / --line when it has them.
 const CT_PHOTO_CSS = [
@@ -55,6 +57,11 @@ function ctT(k, d) {               // the host's own wording (CT_PHOTO_TEXT: a t
   const v = (typeof CT_PHOTO_TEXT === 'object' && CT_PHOTO_TEXT) ? CT_PHOTO_TEXT[k] : undefined;
   if (typeof v === 'function') { try { const r = v(); return typeof r === 'string' ? r : d; } catch (e) { return d; } }
   return typeof v === 'string' ? v : d;
+}
+function ctOpt(k, d) {             // the host's options (CT_PHOTO_OPT: a value, or a function giving one) or the default
+  const v = (typeof CT_PHOTO_OPT === 'object' && CT_PHOTO_OPT) ? CT_PHOTO_OPT[k] : undefined;
+  if (typeof v === 'function') { try { const r = v(); return r == null ? d : r; } catch (e) { return d; } }
+  return v == null ? d : v;
 }
 function ctPhotoCheck() {          // the names of the host contract that are missing (empty = fine)
   const t = {
@@ -493,6 +500,7 @@ async function setBg(v) {
   markBg(v); ed.picked = true;
   try { await edRebuild(v); }
   catch (x) { if (ED === ed) markBg(ed.bg); toast('The background could not be changed: ' + (x.message || x), true); }
+  markEnh();                                        // a new background is made from the photo as uploaded (not HD)
 }
 function markEnh() {
   if (!ED || ED.locked) return;
@@ -535,10 +543,10 @@ async function hdWatch(ed) {
   const tick = setInterval(() => { if (ED === ed && ed.hd.run) show(); }, 1000);
   try {
     for (;;) {
-      await new Promise(r => setTimeout(r, 5000));
+      await new Promise(r => setTimeout(r, ctOpt('pollMs', 5000)));
       if (ED !== ed || !P || P.id !== id) return;                       // closed: the page's poll takes over
       let fresh;
-      try { fresh = await api('get', { id }); } catch (x) { continue; }  // a failed check: try again
+      try { fresh = await api(ctOpt('getAction', 'get'), { id }); } catch (x) { continue; }  // a failed check: try again
       if (ED !== ed || !P || P.id !== id) return;
       Object.assign(P, { status: fresh.status, updated: fresh.updated, enh: fresh.enh });
       if (BUSY.test(fresh.status || '') && !stuck(P)) continue;
@@ -770,7 +778,7 @@ function edDraw() {
   x.fillStyle = '#fff';
   [[x0, y0], [x1, y0], [x0, y1], [x1, y1], [(x0 + x1) / 2, y0], [(x0 + x1) / 2, y1], [x0, (y0 + y1) / 2], [x1, (y0 + y1) / 2]]
     .forEach(([hx, hy]) => x.fillRect(hx - 5, hy - 5, 10, 10));
-  const e = edValue(), L = usedLong(ED.info, e || {}), lv = level(ED.info, e || {});
+  const e = edValue(), d = dims(ED.disp), L = usedLong(ED.info, e || {}, d), lv = level(ED.info, e || {}, d);
   $('#edi').innerHTML = L ? `Kept part: <b>${L} px</b> long side <span class="sz ${lv}" style="position:static;display:inline-block">${
     lv === 'g' ? 'sharp' : lv === 'a' ? 'a little soft' : 'may look blurred'}</span>` : '';
   markEnh();                                       // the crop decides whether ✨ Enhance is offered
@@ -899,7 +907,7 @@ async function edApply() {
   if (!changed) return;
   if (ed.clean || ed.bg !== ed.bg0 || T.reset) ed.info = T.p ? T.p.info : ed.info;
   markDirty(); render();
-  if (e && level(ed.info, e) === 'r') toast(ctT('small', 'The part you kept is small: it may look blurred.'), true);
+  if (e && level(ed.info, e, dims(ed.disp)) === 'r') toast(ctT('small', 'The part you kept is small: it may look blurred.'), true);
 }
 
 // ------------------------------------------------------------------ files

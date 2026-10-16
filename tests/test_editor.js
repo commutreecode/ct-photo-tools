@@ -39,7 +39,7 @@ function reply(action, a) {
   switch (action) {
     case 'photo': { const r = { mime: 'image/jpeg', data: window.__photo || PHOTO, orig: !!a.orig && st.orig, hasOrig: st.orig };
       return window.__slow ? new Promise(res => setTimeout(() => res(r), window.__slow)) : r; }
-    case 'get': return { id: 'P1', status: st.status, enh: st.enh, updated: new Date().toISOString() };
+    case 'get': case 'get2': return { id: 'P1', status: st.status, enh: st.enh, updated: new Date().toISOString() };
     case 'enhance': st.status = 'Enhancing photo…'; return { ok: true };
     case 'bgreset': st.orig = false; return { ok: true };
     default: return { ok: true };
@@ -155,6 +155,13 @@ window.__backend = (action, args) => { window.__calls.push([action, JSON.parse(J
   ok(/HINT P1/.test(await page.textContent('#ed')), 'a text given as a function');
   await page.evaluate(() => { dirty = true; }); await page.click('#hdGo'); await wait(150);
   ok(/HOST TEXT/.test(await page.textContent('#toast')), 'a text given as a string');
+  await page.click('#edC');
+
+  console.log('7b the host\'s options (CT_PHOTO_OPT)');
+  body = host.replace('// @ct-photo-insert', () => "const CT_PHOTO_OPT = { getAction: 'get2', pollMs: () => 300 };\n" + lib);
+  await fresh(); await openEd();
+  await page.click('#hdGo'); await page.waitForFunction(() => window.__calls.some(c => c[0] === 'get2'), null, { timeout: 3000 });
+  ok(!(await calls('get')).length, 'status asked with the host\'s action, at the host\'s pace');
   await page.click('#edC');
 
   console.log('8 a host without a contract name');
